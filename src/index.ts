@@ -1,3 +1,5 @@
+import { getHTML } from "./crawl.js";
+
 const args = process.argv.slice(2);
 if (args.length < 1) {
   console.error("no website provided");
@@ -8,5 +10,5 @@ if (args.length > 1) {
   process.exit(1);
 }
 const baseURL = args[0];
-console.log(baseURL);
+await getHTML(baseURL);
 process.exit(0);

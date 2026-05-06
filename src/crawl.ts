@@ -35,7 +35,10 @@ export function getURLsFromHTML(html: string, baseURL: string): string[] {
   const as = dom.window.document.querySelectorAll("a");
   for (const a of as) {
     const href = a.getAttribute("href");
-    if (href) {
+    if (!href) continue;
+    if (URL.canParse(href)) {
+      urls.push(href);
+    } else {
       urls.push(baseURL + href);
     }
   }
@@ -48,7 +51,10 @@ export function getImagesFromHTML(html: string, baseURL: string): string[] {
   const imgs = dom.window.document.querySelectorAll("img");
   for (const img of imgs) {
     const src = img.getAttribute("src");
-    if (img) {
+    if (!src) continue;
+    if (URL.canParse(src)) {
+      images.push(src);
+    } else {
       images.push(baseURL + src);
     }
   }
@@ -74,4 +80,24 @@ export function extractPageData(
     outgoingLinks: getURLsFromHTML(html, pageURL),
     imageURLs: getImagesFromHTML(html, pageURL),
   };
+}
+
+export async function getHTML(url: string) {
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": "BootCrawler/1.0" },
+    });
+    if (response.status >= 400) {
+      console.error(`Failed to fetch page at: ${url}`);
+      return;
+    }
+    if (!response.headers.get("content-type")?.includes("text/html")) {
+      console.error("Response did not contain html");
+      return;
+    }
+    const html = await response.text();
+    console.log(html);
+  } catch {
+    console.error("Unexpected failure to fetch");
+  }
 }
