@@ -1,4 +1,4 @@
-import { getHTML } from "./crawl.js";
+import { crawlPage, getHTML } from "./crawl.js";
 
 const args = process.argv.slice(2);
 if (args.length < 1) {
@@ -10,5 +10,6 @@ if (args.length > 1) {
   process.exit(1);
 }
 const baseURL = args[0];
-await getHTML(baseURL);
+const pages = await crawlPage(baseURL);
+console.log(pages);
 process.exit(0);

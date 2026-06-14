@@ -39,7 +39,7 @@ export function getURLsFromHTML(html: string, baseURL: string): string[] {
     if (URL.canParse(href)) {
       urls.push(href);
     } else {
-      urls.push(baseURL + href);
+      urls.push(new URL(href, baseURL).href);
     }
   }
   return urls;
@@ -89,15 +89,46 @@ export async function getHTML(url: string) {
     });
     if (response.status >= 400) {
       console.error(`Failed to fetch page at: ${url}`);
-      return;
+      return "";
     }
     if (!response.headers.get("content-type")?.includes("text/html")) {
       console.error("Response did not contain html");
-      return;
+      return "";
     }
     const html = await response.text();
-    console.log(html);
+    return html;
   } catch {
     console.error("Unexpected failure to fetch");
+    return "";
   }
+}
+
+export async function crawlPage(
+  baseURL: string,
+  currentURL: string = baseURL,
+  pages: Record<string, number> = {},
+) {
+  const current = new URL(currentURL);
+  const base = new URL(baseURL);
+  if (current.hostname !== base.hostname) return pages;
+
+  const path = normalizeURL(currentURL);
+  if (pages[path]) {
+    pages[path]++;
+    return pages;
+  }
+  pages[path] = 1;
+
+  try {
+    console.log(`crawling ${currentURL}`);
+    const html = await getHTML(currentURL);
+    const links = getURLsFromHTML(html, baseURL);
+    for (const link of links) {
+      pages = await crawlPage(baseURL, link, pages);
+    }
+  } catch {
+    console.error(`failed to fetch html for ${path}`);
+  }
+
+  return pages;
 }
