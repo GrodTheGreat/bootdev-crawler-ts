@@ -1,4 +1,5 @@
 import { JSDOM } from "jsdom";
+import pLimit, { LimitFunction } from "p-limit";
 
 export function normalizeURL(url: string): string {
   const normalized = new URL(url);
@@ -82,53 +83,94 @@ export function extractPageData(
   };
 }
 
-export async function getHTML(url: string) {
-  try {
-    const response = await fetch(url, {
-      headers: { "User-Agent": "BootCrawler/1.0" },
+export class ConcurrentCrawler {
+  private pages: Record<string, number> = {};
+  private maxPages: number;
+  private limit: LimitFunction;
+  private shouldStop: boolean = false;
+  private allTasks: Set<Promise<void>> = new Set();
+
+  constructor(
+    public baseURL: string,
+    limit: number,
+    maxPages: number,
+  ) {
+    this.limit = pLimit(limit);
+    this.maxPages = maxPages;
+  }
+
+  public async crawl(): Promise<Record<string, number>> {
+    await this.crawlPage(this.baseURL);
+    return this.pages;
+  }
+
+  private addPageVisit(normalizedURL: string): boolean {
+    if (this.shouldStop) return true;
+    if (this.pages.length >= this.maxPages) {
+      this.shouldStop = true;
+      console.log("Reached maximum number of pages to crawl.");
+      return true;
+    }
+
+    if (this.pages[normalizedURL]) {
+      this.pages[normalizedURL]++;
+      return true;
+    }
+    this.pages[normalizedURL] = 1;
+    return false;
+  }
+
+  private async getHTML(url: string): Promise<string> {
+    return await this.limit(async () => {
+      try {
+        const response = await fetch(url, {
+          headers: { "User-Agent": "BootCrawler/1.0" },
+        });
+        if (response.status >= 400) {
+          console.error(`Failed to fetch page at: ${url}`);
+          return "";
+        }
+        if (!response.headers.get("content-type")?.includes("text/html")) {
+          console.error("Response did not contain html");
+          return "";
+        }
+        const html = await response.text();
+        return html;
+      } catch {
+        console.error("Unexpected failure to fetch");
+        return "";
+      }
     });
-    if (response.status >= 400) {
-      console.error(`Failed to fetch page at: ${url}`);
-      return "";
+  }
+
+  async crawlPage(currentURL: string): Promise<void> {
+    if (this.shouldStop) return;
+    const current = new URL(currentURL);
+    const base = new URL(this.baseURL);
+    if (current.hostname !== base.hostname) return;
+
+    const path = normalizeURL(currentURL);
+    if (this.addPageVisit(path)) return;
+
+    try {
+      console.log(`crawling ${currentURL}`);
+      const html = await this.getHTML(currentURL);
+      const links = getURLsFromHTML(html, this.baseURL);
+      const promises = links.map((link) =>
+        this.allTasks.add(this.crawlPage(link)),
+      );
+      await Promise.all(promises).finally(() => this.allTasks.clear());
+    } catch {
+      console.error(`failed to fetch html for ${path}`);
     }
-    if (!response.headers.get("content-type")?.includes("text/html")) {
-      console.error("Response did not contain html");
-      return "";
-    }
-    const html = await response.text();
-    return html;
-  } catch {
-    console.error("Unexpected failure to fetch");
-    return "";
   }
 }
 
-export async function crawlPage(
-  baseURL: string,
-  currentURL: string = baseURL,
-  pages: Record<string, number> = {},
-) {
-  const current = new URL(currentURL);
-  const base = new URL(baseURL);
-  if (current.hostname !== base.hostname) return pages;
-
-  const path = normalizeURL(currentURL);
-  if (pages[path]) {
-    pages[path]++;
-    return pages;
-  }
-  pages[path] = 1;
-
-  try {
-    console.log(`crawling ${currentURL}`);
-    const html = await getHTML(currentURL);
-    const links = getURLsFromHTML(html, baseURL);
-    for (const link of links) {
-      pages = await crawlPage(baseURL, link, pages);
-    }
-  } catch {
-    console.error(`failed to fetch html for ${path}`);
-  }
-
-  return pages;
+export async function crawlSiteAsync(
+  url: string,
+  limit: number,
+  maxPages: number,
+): Promise<Record<string, number>> {
+  const crawler = new ConcurrentCrawler(url, limit, maxPages);
+  return await crawler.crawl();
 }
